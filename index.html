@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Parameter Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F2F4F7;
+    --card: #FFFFFF;
+    --ink: #1B2430;
+    --ink-soft: #5A6572;
+    --line: #D8DEE6;
+    --cobalt: #3056D3;
+    --cobalt-soft: #E7ECFB;
+    --ok: #1A7F4B;
+    --warn: #B45309;
+    --warn-soft: #FDF3E3;
+    --mono: "IBM Plex Mono", monospace;
+    --body: "IBM Plex Sans KR", sans-serif;
+    --disp: "Space Grotesk", var(--body);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--body); padding: 32px 20px 80px; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-bottom: 2px solid var(--ink); padding-bottom: 14px; }
+  h1 { font-family: var(--disp); font-size: clamp(22px, 4vw, 30px); letter-spacing: -0.02em; }
+  h1 .rev { color: var(--cobalt); }
+  .updated { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0 26px; }
+  .chip { font-family: var(--mono); font-size: 12px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); cursor: pointer; color: var(--ink-soft); }
+  .chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  #q { flex: 1 1 180px; font-family: var(--mono); font-size: 13px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); }
+  #q:focus { outline: 2px solid var(--cobalt); outline-offset: 1px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
+  .card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .card-head h2 { font-family: var(--disp); font-size: 17px; }
+  .provider { font-family: var(--mono); font-size: 11px; color: var(--cobalt); background: var(--cobalt-soft); padding: 2px 8px; border-radius: 4px; }
+  .stamp { margin-left: auto; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; }
+  .stamp.ok { color: var(--ok); border: 1px solid currentColor; }
+  .stamp.warn { color: var(--warn); background: var(--warn-soft); }
+
+  .rows { padding: 6px 18px 14px; }
+  .row { display: grid; grid-template-columns: 130px 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .row:last-child { border-bottom: 0; }
+  .row dt { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.06em; padding-top: 2px; }
+  .row dd code { font-family: var(--mono); font-size: 12px; background: var(--paper); padding: 1px 6px; border-radius: 4px; }
+  .note { color: var(--ink-soft); font-size: 12px; }
+  .empty { text-align: center; color: var(--ink-soft); font-family: var(--mono); padding: 60px 0; }
+  @media (max-width: 520px) { .row { grid-template-columns: 1fr; gap: 2px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>LLM PARAM <span class="rev">/REF</span></h1>
+    <span class="updated" id="updated"></span>
+  </header>
+
+  <div class="controls" role="group" aria-label="필터">
+    <input id="q" type="search" placeholder="모델명 검색…" aria-label="모델명 검색">
+    <div id="providers"></div>
+  </div>
+
+  <main id="list"><p class="empty">loading…</p></main>
+</div>
+
+<script>
+let MODELS = [], activeProvider = null;
+
+const fmtVal = v => typeof v === "object" ? JSON.stringify(v) : String(v);
+
+function reasoningText(r) {
+  if (!r || (!r.enable && !r.disable)) return '<span class="note">reasoning 제어 없음</span>';
+  const parts = [];
+  if (r.enable) {
+    const val = r.enable.values ? r.enable.values.join(" | ") : fmtVal(r.enable.value);
+    parts.push(`ON&nbsp;<code>${r.enable.param}: ${val}</code>`);
+  }
+  if (r.disable) parts.push(`OFF&nbsp;<code>${r.disable.param}: ${fmtVal(r.disable.value)}</code>`);
+  return parts.join("<br>");
+}
+
+function tempText(t) {
+  if (!t) return '<span class="note">—</span>';
+  if (!t.supported) return `<span class="note">미지원${t.note ? " · " + t.note : ""}</span>`;
+  const r = t.recommended || {};
+  return Object.entries(r).map(([k, v]) => `<code>${k}: ${v}</code>`).join(" ") || '<span class="note">지원 (권장값 미정)</span>';
+}
+
+function render() {
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const list = document.getElementById("list");
+  const items = MODELS.filter(m =>
+    (!activeProvider || m.provider === activeProvider) &&
+    (!q || m.name.toLowerCase().includes(q) || m.id.includes(q))
+  );
+  if (!items.length) { list.innerHTML = '<p class="empty">no match</p>'; return; }
+  list.innerHTML = items.map(m => `
+    <article class="card">
+      <div class="card-head">
+        <h2>${m.name}</h2>
+        <span class="provider">${m.provider}</span>
+        <span class="stamp ${m.verified ? "ok" : "warn"}">${m.verified ? "VERIFIED" : "UNVERIFIED"}</span>
+      </div>
+      <dl class="rows">
+        <div class="row"><dt>reasoning</dt><dd>${reasoningText(m.reasoning)}</dd></div>
+        <div class="row"><dt>temperature</dt><dd>${tempText(m.temperature)}</dd></div>
+        ${m.notes ? `<div class="row"><dt>notes</dt><dd class="note">${m.notes}</dd></div>` : ""}
+        ${m.sources?.length ? `<div class="row"><dt>sources</dt><dd class="note">${m.sources.map(s => `<a href="${s}">${new URL(s).hostname}</a>`).join(" · ")}</dd></div>` : ""}
+      </dl>
+    </article>`).join("");
+}
+
+fetch("data/models.json").then(r => r.json()).then(data => {
+  MODELS = data.models;
+  document.getElementById("updated").textContent = `last sync ${data.meta.last_updated}`;
+  const providers = [...new Set(MODELS.map(m => m.provider))];
+  document.getElementById("providers").outerHTML = providers.map(p =>
+    `<button class="chip" aria-pressed="false" data-p="${p}">${p}</button>`).join("");
+  document.querySelectorAll(".chip").forEach(btn => btn.addEventListener("click", () => {
+    activeProvider = activeProvider === btn.dataset.p ? null : btn.dataset.p;
+    document.querySelectorAll(".chip").forEach(b => b.setAttribute("aria-pressed", b.dataset.p === activeProvider));
+    render();
+  }));
+  render();
+});
+document.getElementById("q").addEventListener("input", render);
+</script>
+</body>
+</html>

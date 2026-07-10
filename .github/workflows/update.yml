@@ -1,0 +1,61 @@
+name: Update LLM Reference
+
+on:
+  workflow_dispatch:
+    inputs:
+      llm_base_url:
+        description: "LLM 엔드포인트 (비우면 Secret의 기본값 사용)"
+        required: false
+        type: string
+      llm_model:
+        description: "모델명 (비우면 Variable의 기본값 사용)"
+        required: false
+        type: string
+  schedule:
+    - cron: "0 0 * * 1" # 매주 월요일 00:00 UTC (KST 월요일 오전 9시)
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run update script
+        env:
+          # 실행 버튼에서 입력하면 그 값이, 비우면 리포 Secret/Variable이 사용됨
+          LLM_BASE_URL: ${{ inputs.llm_base_url || secrets.LLM_BASE_URL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ inputs.llm_model || vars.LLM_MODEL }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: python scripts/update.py
+
+      - name: Read changelog
+        id: changes
+        run: |
+          if [ -f changes.md ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            { echo "body<<EOF"; cat changes.md; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create pull request
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          add-paths: data/models.json
+          commit-message: "chore: auto-update model reference data"
+          branch: auto/update-reference
+          title: "🔄 모델 레퍼런스 자동 업데이트"
+          body: |
+            자동 수집 파이프라인이 감지한 변경점이에요. Vercel 프리뷰에서 확인 후 머지해주세요.
+
+            ${{ steps.changes.outputs.body }}
