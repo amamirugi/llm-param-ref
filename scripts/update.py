@@ -33,7 +33,11 @@ def http_json(url: str, payload: dict, headers: dict) -> dict:
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", **headers},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "llm-param-ref/1.0 (+github-actions)",
+            **headers,
+        },
     )
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read())
