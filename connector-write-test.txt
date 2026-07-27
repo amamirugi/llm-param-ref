@@ -1,2 +1,0 @@
-GitHub connector write test.
-Created temporarily to verify write access.
