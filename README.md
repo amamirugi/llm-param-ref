@@ -1,49 +1,45 @@
-# LLM Parameter Reference — 자동 업데이트 파이프라인
+# llm-param-ref
 
-정적 사이트(`index.html` + `data/models.json`)와 GitHub Actions 수집 파이프라인으로 구성돼요.
+LLM 엔드포인트의 파라미터 동작을 **실측**해서 기록하는 저장소.
 
-## 구조
+공식 문서나 OpenRouter의 스펙은 프록시를 거치면 자주 어긋난다. 같은 모델이라도
+어느 엔드포인트를 통하느냐에 따라 파라미터 문법도, 허용값도, 기본값도 달라진다.
+그래서 여기에는 **직접 쏴보고 확인한 것만** 적는다.
+
+## 구성
 
 ```
-├── index.html                  # 사이트 (data/models.json을 fetch해서 렌더)
-├── data/models.json            # 단일 데이터 소스 — 여기만 고치면 사이트에 반영
-├── scripts/update.py           # Tavily 검색 → LLM 정리 → 변경점 감지
-└── .github/workflows/update.yml # 수동 버튼 + 매주 자동 실행 → PR 생성
+├── endpoint-probing.md   # 점검 절차와 판정 기준
+├── model-catalog.md      # 모델별 실측 결과
+└── probe.sh              # 절차 자동화 스크립트
 ```
 
-## 초기 설정 (1회)
+## 사용
 
-GitHub 리포 → Settings → Secrets and variables → Actions:
+```bash
+# 키는 ~/.ws-env 에 WS_KEY=... 로 두거나 환경변수로 넘긴다
+chmod +x probe.sh
+./probe.sh <모델 id>
+```
 
-| 종류 | 이름 | 예시 |
-|---|---|---|
-| Secret | `LLM_API_KEY` | Cerebras/OpenRouter 등 키 |
-| Secret | `LLM_BASE_URL` | `https://api.cerebras.ai/v1` |
-| Secret | `TAVILY_API_KEY` | Tavily 키 (무료 월 1,000크레딧) |
-| Variable | `LLM_MODEL` | `llama-3.3-70b` |
+출력을 보고 `model-catalog.md`에 항목을 추가한다. 템플릿은 그 문서 하단에 있다.
 
-백엔드는 OpenAI 호환(`/chat/completions`)이면 뭐든 가능해요. `max_tokens`는
-항상 명시되므로(기본 2000) Cerebras TPM 사전계산 429 문제는 발생하지 않아요.
+다른 엔드포인트를 볼 때는 `WS_BASE`를, rpm이 메타데이터에 없으면 `WS_RPM`을 넘긴다.
 
-## 실행 방법
+```bash
+WS_BASE=https://other.example/v1 WS_RPM=2 ./probe.sh <모델 id>
+```
 
-- **버튼 딸깍**: Actions 탭 → "Update LLM Reference" → Run workflow.
-  이때 뜨는 입력란에 엔드포인트/모델을 즉석에서 넣으면 그 회차만 그 백엔드로 실행돼요.
-  비워두면 위 Secret/Variable 기본값 사용.
-- **자동**: 매주 월요일 KST 오전 9시.
+## 원칙
 
-변경이 감지되면 PR이 생성되고, Vercel이 PR 프리뷰를 배포해요.
-프리뷰 확인 후 머지하면 본 사이트가 갱신돼요. 변경이 없으면 아무 일도 안 일어나요.
+- **실측만 기재한다.** 문서에서 읽은 것, 추측한 것, 다른 모델에서 유추한 것은 넣지 않는다.
+- 미확인 항목은 비워둔다. 빈 칸이 틀린 값보다 낫다.
+- 엔드포인트 단위로 기록한다. 모델 이름이 같아도 경로가 다르면 다른 항목이다.
+- 측정 방법이 바뀌면 `endpoint-probing.md`를 고치고, 영향받는 항목을 다시 잰다.
 
-## Vercel 배포
+## 이력
 
-Vercel 대시보드에서 이 리포를 Import → Framework Preset: **Other**, 빌드 설정 없음.
-정적 파일이라 그대로 서빙돼요. (로컬에서 `file://`로 열면 fetch가 막히니
-`python -m http.server`로 확인하세요.)
-
-## 환각 방지 장치
-
-- 프롬프트에 "스니펫에 문자 그대로 등장하는 파라미터명만 사용" 규칙 명시
-- 스키마 검증 통과 실패 시 변경 무시
-- 직접 커밋 없이 PR 경유 → 사람이 최종 승인
-- 불확실하면 `verified: false`로 표시 (사이트에 UNVERIFIED 스탬프로 노출)
+2026.08.28 — 웹검색 기반 수집 파이프라인(Tavily + GitHub Actions + 정적 사이트)을
+걷어내고 실측 전용으로 전환했다. 수집한 스펙이 실제 엔드포인트 동작과 어긋나
+(예: GLM-5.2의 추론 제어를 `thinking`으로 기재했으나 실제로는 `reasoning_effort`)
+데이터 전반의 신뢰도가 떨어진 것이 이유다. 이전 구조는 커밋 히스토리에 남아 있다.
