@@ -8,6 +8,14 @@
 
 ## api.wellspring.encrypt.gay
 
+전체 모델 목록과 메타데이터:
+
+```bash
+curl -s $BASE/models -H "Authorization: Bearer $KEY" \
+  | jq -r '.data[] | [.id, .rate_limit_rpm, .supports_tools, .supports_reasoning] | @tsv' \
+  | column -t
+```
+
 ### glm-5.2
 
 - 확인일: 2026.08.28
@@ -67,6 +75,7 @@ reasoning_effort=none
 - 단계 조절: **작동** (low와 max가 10배 차이)
 - 파라미터 필터링: 없음 (값 검증 후 에러 반환)
 - rpm: 10
+- 툴콜: **지원** (`supports_tools: true`)
 
 추론 조절 (RisuAI 추가 파라미터 칸. 값만 갈아끼우면 됨):
 
@@ -100,6 +109,7 @@ reasoning_effort=none
 - **`max`는 지연시간 폭탄이다.** 추론만 5만–8만 자.
 - **`high`는 이봉으로 보인다.** 3회 중 1회가 2673, 나머지가 60k대로 중간값이 없다. 과추론 루프에 걸리면 폭주하고 아니면 짧게 끝난다. 켜서 쓸 단계가 못 된다.
 - 결론: **`none` 또는 `low`만 쓴다.** high 이상은 제외.
+- **툴콜이 되는 유일한 모델이다.** 에이전트 자리는 이쪽뿐이다. 추론을 끄고 툴콜만 쓰는 조합이 유효하다.
 - GLM과 반대로 기본값이 추론 OFF다.
 - **추론 트레이스 길이로는 온도 판정이 안 된다.** 같은 온도 안에서도 길이가 2.6배까지 벌어져(temperature 0에서 2597 vs 6679) 그룹이 겹친다.
 - 답 세기를 몰아 쏘면 429가 난다. 7초 간격 필요.
@@ -120,7 +130,7 @@ reasoning_effort=none
 | 단계 조절 | 구분되지 않음 | 작동 (10배 차) |
 | 추론량 (low) | ~0.8–4.8k | ~2.3–4.8k |
 | 추론량 (max) | ~2.1–6.6k | ~49–87k |
-| 툴콜 | 미지원 | 미확인 |
+| 툴콜 | 미지원 | 지원 |
 | rpm | 5 | 10 |
 | 조절 가능한 것 | 추론 on/off | 추론 on/off, 단계, 온도 |
 
