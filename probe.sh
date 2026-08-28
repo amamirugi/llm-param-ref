@@ -5,7 +5,8 @@
 #   export WS_KEY="sk-..."          # 또는 ~/.ws-env 에 WS_KEY=... 저장
 #   ./probe.sh glm-5.2
 #   ./probe.sh deepseek-v4-flash-0731
-#   WS_RPM=2 ./probe.sh some-model  # 메타데이터에 rpm이 없을 때 수동 지정
+#   WS_RPM=2 ./probe.sh some-model     # 메타데이터에 rpm이 없을 때 수동 지정
+#   WS_REPEAT=3 ./probe.sh some-model  # effort 단계마다 3회씩 반복 측정
 #   WS_BASE=https://other.example/v1 ./probe.sh some-model
 #
 # 필요: curl, jq
@@ -18,6 +19,7 @@ BASE="${WS_BASE:-https://api.wellspring.encrypt.gay/v1}"
 KEY="${WS_KEY:?WS_KEY 환경변수를 설정하세요}"
 MODEL="${1:?모델 id를 인자로 주세요}"
 MAX_RETRY="${WS_MAX_RETRY:-4}"
+REPEAT="${WS_REPEAT:-2}"   # effort 단계마다 반복 측정할 횟수
 
 # 추론 부하가 실제로 걸리는 프롬프트. 가벼운 질문은 effort 단계를 구분 못 함.
 PROMPT='세 인물이 있다. A는 B를 배신했지만 B는 모른다. C는 그 사실을 알지만 A에게 빚이 있다. 셋이 한 방에 모이는 장면에서 긴장을 최대로 끌어올릴 대사 순서를 정하고 이유를 설명해.'
@@ -33,7 +35,7 @@ META=$(curl -s "$BASE/models" -H "Authorization: Bearer $KEY" \
 
 # rpm 필드명은 구현마다 다르므로 후보를 순서대로 본다
 RPM="${WS_RPM:-$(echo "$META" | jq -r '
-  .rpm // .rate_limit // .requests_per_minute //
+  .rate_limit_rpm // .rpm // .rate_limit // .requests_per_minute //
   .limits.rpm // .rate_limits.rpm // empty' 2>/dev/null)}"
 
 if [ -n "${RPM:-}" ] && [ "$RPM" -gt 0 ] 2>/dev/null; then
@@ -115,9 +117,10 @@ call 0.7 "__probe__" | jq -r '.error.message // "에러 없음 — 검증을 안
 
 echo
 echo "── 2. effort 스윕 (temperature 0.7 고정) ──"
-echo "  reasoning 길이가 단조 증가하면 작동"
+echo "  단계마다 ${REPEAT}회씩 측정. 반복 간 폭보다 단계 간 차이가 커야 유의미"
 printf "  %-10s %10s %10s %12s\n" "effort" "tokens" "rlen" "finish"
 for E in none low high max; do
+ for rep in $(seq "$REPEAT"); do
   R=$(call 0.7 "$E")
   ERR=$(echo "$R" | jq -r '.error.message // empty')
   if [ -n "$ERR" ]; then
@@ -129,6 +132,7 @@ for E in none low high max; do
       "$L" \
       "$(echo "$R" | jq -r '.choices[0].finish_reason // "?"')"
   fi
+ done
 done
 echo "  * finish가 length면 잘린 것. rlen은 하한값으로만 취급"
 
@@ -139,7 +143,7 @@ echo "  저온에서 한 종류, 고온에서 여러 종류면 작동"
 WORD='딱 한 글자만 출력해. 설명 금지. 다음 중 하나: 가 나 다 라 마'
 N=6
 # rpm이 낮으면 표본을 줄여 대기시간 폭주를 막는다
-[ -n "$RPM" ] && [ "$RPM" -le 3 ] 2>/dev/null && { N=4; echo "  (rpm이 낮아 표본 ${N}회로 축소)"; }
+[ -n "$RPM" ] && [ "$RPM" -le 6 ] 2>/dev/null && { N=4; echo "  (rpm이 낮아 표본 ${N}회로 축소)"; }
 for T in 0 1.5; do
   printf "  temp %-5s" "$T"
   for i in $(seq $N); do
@@ -158,10 +162,14 @@ echo
 echo "── 4. 판정 가이드 ──"
 cat <<'EOF'
   [effort]
-    none에서 rlen=0, low→max 단조 증가  → 4단계 작동
-    넷 다 비슷                          → 같은 라우트로 흐름, effort 무시
+    none에서 rlen=0                      → 추론 on/off 제어는 작동
+    none 포함 전부 0                     → 비추론 모델이거나 라우트 OFF 고정
     1번에서 에러 없음                    → 파라미터가 필터링되는 중
     finish=length                        → 잘림. max_tokens를 올려 재측정
+
+    ! low/high/max 간 서열은 편차가 커서 1회로는 판정 못 한다.
+      같은 단계를 여러 번 재고(WS_REPEAT), 반복 간 폭보다
+      단계 간 차이가 뚜렷할 때만 "단조 증가"로 본다.
 
   [온도]
     temp 0에서 전부 같은 답
@@ -178,4 +186,8 @@ cat <<'EOF'
     rpm 미확인으로 뜨는데 429가 잦으면 WS_RPM=n 으로 직접 지정한다.
     0번 메타데이터 출력에서 실제 필드명을 확인하고, 스크립트 상단
     RPM 후보 목록에 그 이름을 추가해두면 다음부터 자동으로 잡힌다.
+    (wellspring은 rate_limit_rpm 을 쓴다)
+
+    3번이 전부 !빈응답 이면 십중팔구 rpm 미감지다. 먼저 0번에서
+    rpm 필드를 확인하고 다시 돌린다.
 EOF
