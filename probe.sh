@@ -119,10 +119,12 @@ echo
 echo "── 2. effort 스윕 (temperature 0.7 고정) ──"
 echo "  단계마다 ${REPEAT}회씩 측정. 반복 간 폭보다 단계 간 차이가 커야 유의미"
 printf "  %-10s %10s %10s %12s\n" "effort" "tokens" "rlen" "finish"
+NOEFFORT=""
 for E in none low high max; do
  for rep in $(seq "$REPEAT"); do
   R=$(call 0.7 "$E")
   ERR=$(echo "$R" | jq -r '.error.message // empty')
+  [ "$E" = "none" ] && [ -z "$ERR" ] && NOEFFORT="none"
   if [ -n "$ERR" ]; then
     printf "  %-10s %s\n" "$E" "ERROR: ${ERR:0:50}"
   else
@@ -142,13 +144,21 @@ echo "  같은 프롬프트를 반복해 답이 몇 종류 나오는지 센다"
 echo "  저온에서 한 종류, 고온에서 여러 종류면 작동"
 WORD='딱 한 글자만 출력해. 설명 금지. 다음 중 하나: 가 나 다 라 마'
 N=6
+# 추론이 켜져 있으면 짧은 토큰 예산을 추론이 다 먹어 본문이 빈다.
+# 2번에서 none이 통했으면 여기서 꺼둔다.
+[ -n "$NOEFFORT" ] && echo "  (추론을 $NOEFFORT 로 끄고 측정)"
 # rpm이 낮으면 표본을 줄여 대기시간 폭주를 막는다
 [ -n "$RPM" ] && [ "$RPM" -le 6 ] 2>/dev/null && { N=4; echo "  (rpm이 낮아 표본 ${N}회로 축소)"; }
 for T in 0 1.5; do
   printf "  temp %-5s" "$T"
   for i in $(seq $N); do
-    B=$(jq -n --arg m "$MODEL" --arg p "$WORD" --argjson t "$T" \
-      '{model:$m,messages:[{role:"user",content:$p}],temperature:$t,max_tokens:8}')
+    if [ -n "$NOEFFORT" ]; then
+      B=$(jq -n --arg m "$MODEL" --arg p "$WORD" --argjson t "$T" --arg e "$NOEFFORT" \
+        '{model:$m,messages:[{role:"user",content:$p}],temperature:$t,reasoning_effort:$e,max_tokens:16}')
+    else
+      B=$(jq -n --arg m "$MODEL" --arg p "$WORD" --argjson t "$T" \
+        '{model:$m,messages:[{role:"user",content:$p}],temperature:$t,max_tokens:512}')
+    fi
     printf " %s" "$(request "$B" \
       | jq -r '.choices[0].message.content // ("!" + (.error.message // "빈응답")[0:12])' \
       | tr -d '\n ')"
@@ -188,6 +198,7 @@ cat <<'EOF'
     RPM 후보 목록에 그 이름을 추가해두면 다음부터 자동으로 잡힌다.
     (wellspring은 rate_limit_rpm 을 쓴다)
 
-    3번이 전부 !빈응답 이면 십중팔구 rpm 미감지다. 먼저 0번에서
-    rpm 필드를 확인하고 다시 돌린다.
+    3번이 전부 !빈응답 이면 rpm 미감지이거나, 추론이 켜진 채로
+    토큰 예산을 추론이 다 먹은 것이다. 0번에서 rpm 필드를 확인하고,
+    2번에서 none 이 통했는지 본다.
 EOF
